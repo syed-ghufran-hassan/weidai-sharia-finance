@@ -47,13 +47,16 @@ Loss recording and accounting.
 The protocol consists of the following smart contracts:
 
 Contract	Responsibility
-MurabahaFinancing.sol	Manages financing requests, repayments, collateral, and liquidation.
-MudarabahPool.sol	Manages lender deposits, shares, withdrawals, and profit distribution.
-MockOracle.sol	Provides collateral pricing for testing.
-IPriceOracle.sol	Price oracle interface.
-IMudarabahPool.sol	Mudarabah pool interface.
+
+MurabahaFinancing.sol - 	Manages financing requests, repayments, collateral, and liquidation.
+MudarabahPool.sol - 	Manages lender deposits, shares, withdrawals, and profit distribution.
+MockOracle.sol	- Provides collateral pricing for testing.
+IPriceOracle.sol	- Price oracle interface.
+IMudarabahPool.sol	- Mudarabah pool interface.
+
 Protocol Flow
-text
+
+```text
               LENDER
                  |
                  | Deposit USDC
@@ -90,7 +93,11 @@ text
          LENDERS     TREASURY
            80%          20%
 
-⚙️ Protocol Parameters
+```
+
+
+**⚙️ Protocol Parameters**
+
 Parameter	Value
 Financing markup	10%
 Required collateral ratio	150%
