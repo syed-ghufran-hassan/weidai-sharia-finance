@@ -231,6 +231,8 @@ Passing automated tests does not guarantee security or Sharia compliance.
 The protocol has not been independently audited or certified as Sharia-compliant.
 
 🗺️ Roadmap
+
+
 Murabaha financing contract.
 Mudarabah liquidity pool.
 Collateral management.
@@ -245,6 +247,7 @@ Sharia compliance review.
 Testnet deployment.
 Frontend integration.
 Mainnet deployment.
+
 📜 License
 
 This project is licensed under the MIT License.
