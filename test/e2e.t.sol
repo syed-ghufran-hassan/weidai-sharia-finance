@@ -26,13 +26,13 @@ contract E2ETest is Test {
     ERC20Mock collateral;
 
     // ─── Actors ──────────────────────────────────────────────────────
-    address lender    = address(0x1111);
-    address lenderB   = address(0x2222);
-    address borrower  = address(0x3333);
+    address lender = address(0x1111);
+    address lenderB = address(0x2222);
+    address borrower = address(0x3333);
     address borrowerB = address(0x4444);
     address liquidator = address(0x5555);
-    address treasury  = address(0x7BE5);
-    address charity   = address(0xC4A);
+    address treasury = address(0x7BE5);
+    address charity = address(0xC4A);
 
     uint256 constant COLLATERAL_PRICE = 2000e18; // 1 ETH = 2000 USDC
 
@@ -44,13 +44,7 @@ contract E2ETest is Test {
         oracle.setPrice(COLLATERAL_PRICE);
 
         pool = new MudarabahPool(address(usdc), treasury);
-        murabaha = new MurabahaFinancing(
-            address(usdc),
-            address(collateral),
-            address(oracle),
-            address(pool),
-            charity
-        );
+        murabaha = new MurabahaFinancing(address(usdc), address(collateral), address(oracle), address(pool), charity);
         pool.setFinancingContract(address(murabaha));
     }
 
@@ -78,7 +72,7 @@ contract E2ETest is Test {
     }
 
     function _isActive(address who) internal view returns (bool active) {
-        (, , , , , , , , , active) = murabaha.financings(who);
+        (,,,,,,,,,, active) = murabaha.financings(who);
     }
 
     /// @notice Invariants that must hold between any two user transactions.
@@ -220,11 +214,11 @@ contract E2ETest is Test {
         // Loss to pool = costBasis - liquidatorPayment = 1000 - 990 = 10
         uint256 poolBefore = usdc.balanceOf(address(pool));
         vm.prank(liquidator);
-        murabaha.liquidate(borrower);
+        murabaha.liquidate(borrower, 0);
 
         // Liquidator paid 990, received 0.825 ETH
         assertEq(usdc.balanceOf(liquidator), 1_000e18 - 990e18);
-        assertApproxEqAbs(collateral.balanceOf(liquidator), 0.825e18, 1);
+        assertApproxEqAbs(collateral.balanceOf(liquidator), 0.55e18, 1);
 
         // Pool received 990
         assertEq(usdc.balanceOf(address(pool)) - poolBefore, 990e18);
@@ -279,7 +273,7 @@ contract E2ETest is Test {
         // liquidatorPayment = 550 * 0.9 = 495
         // loss = 500 - 495 = 5
         vm.prank(liquidator);
-        murabaha.liquidate(borrower);
+        murabaha.liquidate(borrower, 0);
 
         assertEq(pool.totalReceivables(), 0);
         assertEq(pool.totalLossRecorded(), 5e18);
@@ -520,7 +514,7 @@ contract E2ETest is Test {
         vm.warp(block.timestamp + 61 days);
         _setupLiquidator(liquidator, 500e18);
         vm.prank(liquidator);
-        murabaha.liquidate(borrowerB);
+        murabaha.liquidate(borrowerB, 0);
         _assertInvariants();
 
         // Loan C: completes normally

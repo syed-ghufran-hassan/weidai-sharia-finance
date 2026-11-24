@@ -19,6 +19,8 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
     uint256 public totalReceivables;
     uint256 public totalProfitDistributed;
     uint256 public totalLossRecorded;
+    uint256 public totalDeposited; // cumulative tokens in
+    uint256 public totalWithdrawn; // cumulative tokens out
 
     uint256 public constant SHARE_PRECISION = 1e18;
     uint256 public constant MUDARIB_SHARE = 20e16;
@@ -37,9 +39,7 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
         _;
     }
 
-    constructor(address _financingToken, address _treasury)
-        Ownable(msg.sender)
-    {
+    constructor(address _financingToken, address _treasury) Ownable(msg.sender) {
         require(_financingToken != address(0), "Zero financingToken");
         require(_treasury != address(0), "Zero treasury");
         financingToken = IERC20(_financingToken);
@@ -62,12 +62,11 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
         require(amount > 0, "Amount must be > 0");
         sharesMinted = (amount * SHARE_PRECISION) / shareValue();
 
-        // Effects
         shares[msg.sender] += sharesMinted;
         totalShares += sharesMinted;
+        totalDeposited += amount; // ← new
         emit Deposited(msg.sender, amount, sharesMinted);
 
-        // Interaction
         financingToken.safeTransferFrom(msg.sender, address(this), amount);
     }
 
@@ -76,12 +75,11 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
         require(shares[msg.sender] >= sharesToBurn, "Insufficient shares");
         amountOut = (sharesToBurn * shareValue()) / SHARE_PRECISION;
 
-        // Effects
         shares[msg.sender] -= sharesToBurn;
         totalShares -= sharesToBurn;
+        totalWithdrawn += amountOut; // ← new
         emit Withdrawn(msg.sender, sharesToBurn, amountOut);
 
-        // Interaction
         financingToken.safeTransfer(msg.sender, amountOut);
     }
 

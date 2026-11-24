@@ -4,6 +4,12 @@ import "./interfaces/IPriceOracle.sol";
 
 contract MockOracle is IPriceOracle {
     uint256 public price = 2000e18;
-    function setPrice(uint256 p) external { price = p; }
-    function getPrice() external view override returns (uint256) { return price; }
+
+    function setPrice(uint256 p) external {
+        price = p;
+    }
+
+    function getPrice() external view override returns (uint256) {
+        return price;
+    }
 }
