@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IPriceOracle.sol";
 import "./interfaces/IMudarabahPool.sol";
+import "./interfaces/IUnderwritingRegistry.sol";
 
 contract MurabahaFinancing is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -16,6 +17,7 @@ contract MurabahaFinancing is Ownable, ReentrancyGuard {
     IPriceOracle public immutable oracle;
     IMudarabahPool public immutable pool;
     address public immutable charity;
+    IUnderwritingRegistry public underwritingRegistry;
 
     uint256 public constant BPS = 10_000;
     uint256 public constant MARKUP_BPS = 1_000;
@@ -56,6 +58,7 @@ contract MurabahaFinancing is Ownable, ReentrancyGuard {
         address indexed borrower, uint256 costPrice, uint256 salePrice, uint256 collateral, uint256 installments
     );
     event InstallmentPaid(address indexed borrower, uint256 payment, uint256 remaining);
+    event UnderwritingRegistryUpdated(address indexed registry);
     event FinancingCompleted(address indexed borrower);
     event LatePenaltyCharged(address indexed borrower, uint256 amount);
     event PositionFlagged(address indexed borrower, uint256 ratio, uint256 cureDeadline);
@@ -85,6 +88,15 @@ contract MurabahaFinancing is Ownable, ReentrancyGuard {
         oracle = IPriceOracle(_oracle);
         pool = IMudarabahPool(_pool);
         charity = _charity;
+    }
+
+    function setUnderwritingRegistry(address registry) external onlyOwner {
+        require(registry != address(0), "Invalid registry");
+        require(registry.code.length > 0, "Not a contract");
+
+        underwritingRegistry = IUnderwritingRegistry(registry);
+
+        emit UnderwritingRegistryUpdated(registry);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -188,9 +200,14 @@ contract MurabahaFinancing is Ownable, ReentrancyGuard {
     // ══════════════════════════════════════════════════════════════════
 
     function requestFinancing(uint256 amount, uint256 installments) external nonReentrant {
+        require(address(underwritingRegistry) != address(0), "Registry not configured");
+        require(underwritingRegistry.isApproved(msg.sender), "Underwriting not approved");
+
         require(amount > 0, "Amount must be > 0");
         require(installments > 0 && installments <= MAX_INSTALLMENTS, "Bad installments");
         require(!financings[msg.sender].active, "Existing financing");
+
+        underwritingRegistry.consumeApproval(msg.sender);
 
         uint256 markup = (amount * MARKUP_BPS) / BPS;
         uint256 salePrice = amount + markup;

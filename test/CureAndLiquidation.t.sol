@@ -6,6 +6,7 @@ import "../src/MudarabahPool.sol";
 import "../src/MurabahaFinancing.sol";
 import "../src/MockOracle.sol";
 import "./mocks/ERC20Mock.sol";
+import "../src/UnderwritingRegistry.sol";
 
 contract CureAndLiquidationTest is Test {
     MudarabahPool pool;
@@ -13,6 +14,8 @@ contract CureAndLiquidationTest is Test {
     MockOracle oracle;
     ERC20Mock usdc;
     ERC20Mock weth;
+    UnderwritingRegistry registry;
+    address underwriter = address(0xBEEF);
 
     address lender = address(0xA11CE);
     address borrower = address(0xB0B);
@@ -29,6 +32,12 @@ contract CureAndLiquidationTest is Test {
         pool = new MudarabahPool(address(usdc), treasury);
         murabaha = new MurabahaFinancing(address(usdc), address(weth), address(oracle), address(pool), charity);
         pool.setFinancingContract(address(murabaha));
+        registry = new UnderwritingRegistry(address(this));
+
+        registry.setFinancingContract(address(murabaha));
+        murabaha.setUnderwritingRegistry(address(registry));
+
+        registry.grantUnderwriter(underwriter);
 
         // Lender deposits 10,000
         usdc.mint(lender, 10_000e18);
@@ -53,6 +62,15 @@ contract CureAndLiquidationTest is Test {
     function _openLoan() internal {
         // cost 1000, sale 1100, 4 installments of 275
         // collateral = 1100 * 1.5 / 2000 = 0.825 ETH
+
+        bytes32 documentHash = keccak256(abi.encode(borrower, block.timestamp, block.number));
+
+        vm.prank(borrower);
+        registry.submitRecord(documentHash);
+
+        vm.prank(underwriter);
+        registry.reviewRecord(borrower, true);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1000e18, 4);
     }

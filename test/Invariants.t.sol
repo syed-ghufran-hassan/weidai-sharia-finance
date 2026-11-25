@@ -6,6 +6,7 @@ import "../src/MudarabahPool.sol";
 import "../src/MurabahaFinancing.sol";
 import "../src/MockOracle.sol";
 import "./mocks/ERC20Mock.sol";
+import "../src/UnderwritingRegistry.sol";
 
 /**
  * @title Handler
@@ -18,6 +19,7 @@ contract Handler is Test {
     MockOracle public oracle;
     ERC20Mock public usdc;
     ERC20Mock public weth;
+    UnderwritingRegistry public registry;
 
     address[3] public lenders;
     address[3] public borrowers;
@@ -36,13 +38,15 @@ contract Handler is Test {
         MurabahaFinancing _murabaha,
         MockOracle _oracle,
         ERC20Mock _usdc,
-        ERC20Mock _weth
+        ERC20Mock _weth,
+        UnderwritingRegistry _registry
     ) {
         pool = _pool;
         murabaha = _murabaha;
         oracle = _oracle;
         usdc = _usdc;
         weth = _weth;
+        registry = _registry;
 
         lenders[0] = address(0xA1);
         lenders[1] = address(0xA2);
@@ -104,20 +108,36 @@ contract Handler is Test {
 
     function requestFinancing(uint256 actorSeed, uint256 amount, uint256 installments) external {
         address actor = borrowers[actorSeed % 3];
+
         if (_isActive(actor)) return;
         if (usdc.balanceOf(address(pool)) < 10e18) return;
+
         amount = bound(amount, 100e18, 2_000e18);
         installments = bound(installments, 1, 12);
 
         uint256 requiredCollateral = (amount * 110e16 * 150e16) / (oracle.getPrice() * 100e16);
+
         weth.mint(actor, requiredCollateral);
+
+        // Submit the borrower's encrypted-record hash.
+        bytes32 documentHash = keccak256(abi.encode(actor, block.timestamp, block.number));
+
+        vm.prank(actor);
+        registry.submitRecord(documentHash);
+
+        // Handler is the authorized underwriter.
+        registry.reviewRecord(actor, true);
+
+        // Borrower approves collateral and requests financing.
         vm.startPrank(actor);
         weth.approve(address(murabaha), requiredCollateral);
+
         try murabaha.requestFinancing(amount, installments) {}
         catch {
             vm.stopPrank();
             return;
         }
+
         vm.stopPrank();
         _checkpoint();
     }
@@ -199,6 +219,7 @@ contract InvariantsTest is Test {
     ERC20Mock usdc;
     ERC20Mock weth;
     Handler handler;
+    UnderwritingRegistry registry;
 
     address treasury = address(0x7BE5);
     address charity = address(0xC4A);
@@ -213,7 +234,14 @@ contract InvariantsTest is Test {
         murabaha = new MurabahaFinancing(address(usdc), address(weth), address(oracle), address(pool), charity);
         pool.setFinancingContract(address(murabaha));
 
-        handler = new Handler(pool, murabaha, oracle, usdc, weth);
+        registry = new UnderwritingRegistry(address(this));
+        registry.setFinancingContract(address(murabaha));
+        murabaha.setUnderwritingRegistry(address(registry));
+
+        handler = new Handler(pool, murabaha, oracle, usdc, weth, registry);
+
+        // Allow the handler to review borrower records.
+        registry.grantUnderwriter(address(handler));
 
         // Only handler can drive the system
         targetContract(address(handler));
@@ -221,7 +249,6 @@ contract InvariantsTest is Test {
         // Seed via handler so accounting identity ghost tracks it
         handler.deposit(0, 5_000e18);
         handler.deposit(1, 5_000e18);
-
     }
 
     // ─────────────────────────────────────────────────────────────────

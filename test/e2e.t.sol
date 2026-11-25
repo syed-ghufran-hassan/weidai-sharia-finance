@@ -6,6 +6,7 @@ import "../src/MudarabahPool.sol";
 import "../src/MurabahaFinancing.sol";
 import "../src/MockOracle.sol";
 import "./mocks/ERC20Mock.sol";
+import "../src/UnderwritingRegistry.sol";
 
 /**
  * @title E2E
@@ -24,6 +25,7 @@ contract E2ETest is Test {
     MockOracle oracle;
     ERC20Mock usdc;
     ERC20Mock collateral;
+    UnderwritingRegistry registry;
 
     // ─── Actors ──────────────────────────────────────────────────────
     address lender = address(0x1111);
@@ -33,6 +35,7 @@ contract E2ETest is Test {
     address liquidator = address(0x5555);
     address treasury = address(0x7BE5);
     address charity = address(0xC4A);
+    address underwriter = address(0xBEEF);
 
     uint256 constant COLLATERAL_PRICE = 2000e18; // 1 ETH = 2000 USDC
 
@@ -45,6 +48,12 @@ contract E2ETest is Test {
 
         pool = new MudarabahPool(address(usdc), treasury);
         murabaha = new MurabahaFinancing(address(usdc), address(collateral), address(oracle), address(pool), charity);
+        registry = new UnderwritingRegistry(address(this));
+
+        registry.setFinancingContract(address(murabaha));
+        murabaha.setUnderwritingRegistry(address(registry));
+
+        registry.grantUnderwriter(underwriter);
         pool.setFinancingContract(address(murabaha));
     }
 
@@ -96,6 +105,16 @@ contract E2ETest is Test {
         pool.deposit(depositAmount);
     }
 
+    function _approveUnderwriting(address borrowerAddress) internal {
+        bytes32 documentHash = keccak256(abi.encode(borrowerAddress, block.timestamp, block.number));
+
+        vm.prank(borrowerAddress);
+        registry.submitRecord(documentHash);
+
+        vm.prank(underwriter);
+        registry.reviewRecord(borrowerAddress, true);
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // TEST 1 — Golden path: deposit → finance → pay → withdraw
     // ══════════════════════════════════════════════════════════════════
@@ -113,6 +132,9 @@ contract E2ETest is Test {
         //   each installment = 275 = 250 principal + 25 markup
         //   required collateral = 1100 * 1.5 / 2000 = 0.825 ETH
         _setupBorrower(borrower, 10e18);
+
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
@@ -169,6 +191,8 @@ contract E2ETest is Test {
         _seedPool();
 
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
@@ -202,6 +226,8 @@ contract E2ETest is Test {
         _seedPool();
 
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
@@ -249,6 +275,8 @@ contract E2ETest is Test {
         _seedPool();
 
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
@@ -316,11 +344,15 @@ contract E2ETest is Test {
 
         // Borrower A finances 1,000 (markup 100)
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
         // Borrower B finances 500 (markup 50)
         _setupBorrower(borrowerB, 10e18);
+        _approveUnderwriting(borrowerB);
+
         vm.prank(borrowerB);
         murabaha.requestFinancing(500e18, 4);
 
@@ -368,6 +400,8 @@ contract E2ETest is Test {
 
         // Borrower takes 5,000
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(5_000e18, 4);
 
@@ -400,6 +434,8 @@ contract E2ETest is Test {
         _seedPool();
 
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 12);
 
@@ -427,6 +463,7 @@ contract E2ETest is Test {
         _setupBorrower(borrower, 10e18);
 
         // ── Round 1 ──────────────────────────────────────────────────
+        _approveUnderwriting(borrower);
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
@@ -440,6 +477,7 @@ contract E2ETest is Test {
         assertApproxEqAbs(collateral.balanceOf(borrower), 10e18, 1);
 
         // ── Round 2: same terms ──────────────────────────────────────
+        _approveUnderwriting(borrower);
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
 
@@ -467,6 +505,7 @@ contract E2ETest is Test {
     function test_E2E_SingleInstallment() public {
         _seedPool();
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
 
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 1);
@@ -495,6 +534,8 @@ contract E2ETest is Test {
 
         // Loan A: completes normally
         _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
         usdc.mint(borrower, 1_100e18);
@@ -507,6 +548,8 @@ contract E2ETest is Test {
 
         // Loan B: defaults → liquidation
         _setupBorrower(borrowerB, 10e18);
+        _approveUnderwriting(borrowerB);
+
         vm.prank(borrowerB);
         murabaha.requestFinancing(500e18, 4);
         _assertInvariants();
@@ -518,7 +561,9 @@ contract E2ETest is Test {
         _assertInvariants();
 
         // Loan C: completes normally
-        _setupBorrower(borrower, 10e18); // reuse borrower
+        _setupBorrower(borrower, 10e18);
+        _approveUnderwriting(borrower);
+
         vm.prank(borrower);
         murabaha.requestFinancing(1_000e18, 4);
         usdc.mint(borrower, 1_100e18);
