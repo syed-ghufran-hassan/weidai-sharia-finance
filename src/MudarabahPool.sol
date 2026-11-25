@@ -33,6 +33,7 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
     event ReceivableIncreased(uint256 amount, uint256 newTotal);
     event ReceivableDecreased(uint256 amount, uint256 newTotal);
     event FinancingContractUpdated(address indexed previous, address indexed current);
+    event ResidualAssetsSwept(uint256 amount, address indexed treasury);
 
     modifier onlyFinancing() {
         require(msg.sender == financingContract, "Only financing contract");
@@ -60,7 +61,12 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
 
     function deposit(uint256 amount) external nonReentrant returns (uint256 sharesMinted) {
         require(amount > 0, "Amount must be > 0");
+        if (totalShares == 0) {
+            require(totalReceivables == 0 && financingToken.balanceOf(address(this)) == 0, "Residual assets");
+        }
         sharesMinted = (amount * SHARE_PRECISION) / shareValue();
+
+        require(sharesMinted > 0, "Zero shares minted");
 
         shares[msg.sender] += sharesMinted;
         totalShares += sharesMinted;
@@ -81,6 +87,17 @@ contract MudarabahPool is Ownable, ReentrancyGuard {
         emit Withdrawn(msg.sender, sharesToBurn, amountOut);
 
         financingToken.safeTransfer(msg.sender, amountOut);
+    }
+
+    function sweepResidualAssets() external onlyOwner nonReentrant {
+        require(totalShares == 0, "Shares still exist");
+        require(totalReceivables == 0, "Receivables still exist");
+
+        uint256 amount = financingToken.balanceOf(address(this));
+        require(amount > 0, "No residual assets");
+
+        emit ResidualAssetsSwept(amount, treasury);
+        financingToken.safeTransfer(treasury, amount);
     }
 
     // ─── Financing hooks ──────────────────────────────────────────────

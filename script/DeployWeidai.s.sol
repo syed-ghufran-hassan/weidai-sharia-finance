@@ -1,4 +1,3 @@
- 
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -15,46 +14,28 @@ contract DeployWeidai is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
-        address underwriter = vm.envOr(
-            "UNDERWRITER_ADDRESS",
-            deployer
-        );
+        address underwriter = vm.envOr("UNDERWRITER_ADDRESS", deployer);
 
         vm.startBroadcast(deployerPrivateKey);
 
         // 1. Deploy mock financing and collateral tokens.
-        ERC20Mock financingToken = new ERC20Mock(
-            "Mock USDC",
-            "mUSDC"
-        );
+        ERC20Mock financingToken = new ERC20Mock("Mock USDC", "mUSDC");
 
-        ERC20Mock collateralToken = new ERC20Mock(
-            "Mock Collateral",
-            "mCOL"
-        );
+        ERC20Mock collateralToken = new ERC20Mock("Mock Collateral", "mCOL");
 
         // 2. Deploy price oracle.
         MockOracle oracle = new MockOracle();
 
         // 3. Deploy Mudarabah pool.
-        MudarabahPool pool = new MudarabahPool(
-            address(financingToken),
-            deployer
-        );
+        MudarabahPool pool = new MudarabahPool(address(financingToken), deployer);
 
         // 4. Deploy Murabaha financing.
         MurabahaFinancing murabaha = new MurabahaFinancing(
-            address(financingToken),
-            address(collateralToken),
-            address(oracle),
-            address(pool),
-            deployer
+            address(financingToken), address(collateralToken), address(oracle), address(pool), deployer
         );
 
         // 5. Deploy underwriting registry.
-        UnderwritingRegistry registry = new UnderwritingRegistry(
-            deployer
-        );
+        UnderwritingRegistry registry = new UnderwritingRegistry(deployer);
 
         // 6. Configure contract connections.
         pool.setFinancingContract(address(murabaha));
@@ -80,4 +61,3 @@ contract DeployWeidai is Script {
         console2.log("Underwriting Registry:", address(registry));
     }
 }
- 
