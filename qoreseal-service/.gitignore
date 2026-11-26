@@ -1,0 +1,21 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Encryption keys and backups
+*.key
+*.pem
+*.seed
+*.mnemonic
+keys/
+secrets/
+
+# Encrypted application data
+encrypted-underwriting-record.txt
+uploads/
+storage/
+
+# Runtime data
+logs/
+*.log
