@@ -1,4 +1,3 @@
- 
 import { useEffect, useState } from "react";
 import { BrowserProvider } from "ethers";
 import { runQoreSealBrowserTest } from "./lib/qoresealBrowserTest";
@@ -9,6 +8,13 @@ import {
   getUnderwriterAccess,
   getUnderwriterRecord,
   reviewUnderwritingRecord,
+  getPendingUnderwritingApplications,
+  getFinancingQuote,
+  approveCollateral,
+  requestMurabahaFinancing,
+  approveRepayment,
+  payMurabahaInstallment,
+  mintCollateral,
 } from "./hooks/useContracts";
 
 import "./App.css";
@@ -26,6 +32,9 @@ const QORE_NETWORK = {
   rpcUrls: ["https://evm-testnet.qore.host"],
 };
 
+const AUTHORIZED_TEST_WALLET =
+  "0x7b5de1962d5f338cf00e25f1d5803c922bb76224";
+
 type DashboardData = Awaited<
   ReturnType<typeof getBorrowerDashboard>
 >;
@@ -39,32 +48,64 @@ function App() {
 
   const [error, setError] = useState("");
 
+  // UNDERWRITING STATE
+
   const [encryptedEnvelope, setEncryptedEnvelope] = useState("");
   const [submittingUnderwriting, setSubmittingUnderwriting] =
     useState(false);
   const [underwritingMessage, setUnderwritingMessage] = useState("");
+
+  // QORESEAL STATE
+
   const [testingQoreSeal, setTestingQoreSeal] = useState(false);
   const [qoreSealResult, setQoreSealResult] = useState("");
 
-  // =========================================
-// UNDERWRITER DASHBOARD STATE
-// =========================================
+  // UNDERWRITER DASHBOARD STATE
 
-const [isUnderwriter, setIsUnderwriter] = useState(false);
-const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingApplications, setPendingApplications] = useState<
+    Awaited<ReturnType<typeof getUnderwriterRecord>>[]
+  >([]);
 
-const [underwriterBorrower, setUnderwriterBorrower] = useState("");
+  const [loadingApplications, setLoadingApplications] = useState(false);
+  const [isUnderwriter, setIsUnderwriter] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-const [underwriterRecord, setUnderwriterRecord] =
-  useState<Awaited<ReturnType<typeof getUnderwriterRecord>> | null>(null);
+  const [underwriterBorrower, setUnderwriterBorrower] = useState("");
 
-const [loadingUnderwriterRecord, setLoadingUnderwriterRecord] =
-  useState(false);
+  const [underwriterRecord, setUnderwriterRecord] =
+    useState<Awaited<ReturnType<typeof getUnderwriterRecord>> | null>(null);
 
-const [reviewingApplication, setReviewingApplication] =
-  useState(false);
+  const [loadingUnderwriterRecord, setLoadingUnderwriterRecord] =
+    useState(false);
 
-const [underwriterMessage, setUnderwriterMessage] = useState("");
+  const [reviewingApplication, setReviewingApplication] =
+    useState(false);
+
+  const [underwriterMessage, setUnderwriterMessage] = useState("");
+
+  // MURABAHA FINANCING STATE
+
+  const [financingAmount, setFinancingAmount] = useState("");
+  const [financingInstallments, setFinancingInstallments] = useState(6);
+
+  const [financingQuote, setFinancingQuote] =
+    useState<Awaited<ReturnType<typeof getFinancingQuote>> | null>(null);
+
+  const [loadingQuote, setLoadingQuote] = useState(false);
+  const [approvingCollateral, setApprovingCollateral] = useState(false);
+  const [submittingFinancing, setSubmittingFinancing] = useState(false);
+
+  const [approvingRepayment, setApprovingRepayment] = useState(false);
+  const [payingInstallment, setPayingInstallment] = useState(false);
+
+  const [financingMessage, setFinancingMessage] = useState("");
+  const [repaymentMessage, setRepaymentMessage] = useState("");
+
+  // TEST COLLATERAL MINTING STATE
+
+  const [mintingCollateral, setMintingCollateral] = useState(false);
+  const [mintCollateralMessage, setMintCollateralMessage] = useState("");
+
   // =========================================
   // INITIAL WALLET SYNCHRONIZATION
   // =========================================
@@ -140,11 +181,7 @@ const [underwriterMessage, setUnderwriterMessage] = useState("");
         }
       }
 
-      // Request the currently selected MetaMask account.
-      const accounts = await provider.send(
-        "eth_requestAccounts",
-        []
-      );
+      const accounts = await provider.send("eth_requestAccounts", []);
 
       const address = accounts[0];
 
@@ -194,6 +231,211 @@ const [underwriterMessage, setUnderwriterMessage] = useState("");
   }
 
   // =========================================
+  // MURABAHA FINANCING HANDLERS
+  // =========================================
+
+  async function handleGetFinancingQuote() {
+    try {
+      setLoadingQuote(true);
+      setError("");
+      setFinancingMessage("");
+      setFinancingQuote(null);
+
+      if (!account) {
+        throw new Error("Connect your wallet first.");
+      }
+
+      if (!dashboard?.underwriting.approved) {
+        throw new Error(
+          "Your underwriting application must be approved first."
+        );
+      }
+
+      if (dashboard.financing.active) {
+        throw new Error("You already have active financing.");
+      }
+
+      const quote = await getFinancingQuote(
+        financingAmount,
+        financingInstallments
+      );
+
+      setFinancingQuote(quote);
+    } catch (err: any) {
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Unable to calculate financing quote."
+      );
+    } finally {
+      setLoadingQuote(false);
+    }
+  }
+
+  async function handleApproveCollateral() {
+    try {
+      if (!financingQuote) {
+        throw new Error("Calculate your financing quote first.");
+      }
+
+      setApprovingCollateral(true);
+      setError("");
+      setFinancingMessage("");
+
+      const transactionHash = await approveCollateral(
+        financingQuote.requiredCollateralRaw
+      );
+
+      setFinancingMessage(
+        `Collateral approval successful. Transaction: ${transactionHash}`
+      );
+
+      await loadDashboard(account);
+    } catch (err: any) {
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Collateral approval failed."
+      );
+    } finally {
+      setApprovingCollateral(false);
+    }
+  }
+
+  async function handleRequestFinancing() {
+    try {
+      if (!financingQuote) {
+        throw new Error("Calculate your financing quote first.");
+      }
+
+      setSubmittingFinancing(true);
+      setError("");
+      setFinancingMessage("");
+
+      const transactionHash = await requestMurabahaFinancing(
+        financingAmount,
+        financingInstallments,
+        financingQuote.requiredCollateralRaw
+      );
+
+      setFinancingMessage(
+        `Murabaha financing created successfully. Transaction: ${transactionHash}`
+      );
+
+      setFinancingQuote(null);
+      setFinancingAmount("");
+
+      await loadDashboard(account);
+    } catch (err: any) {
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Financing request failed."
+      );
+    } finally {
+      setSubmittingFinancing(false);
+    }
+  }
+
+  // =========================================
+  // TEST COLLATERAL MINTING
+  // =========================================
+
+  async function handleMintCollateral() {
+    try {
+      if (!account) {
+        throw new Error("Connect your MetaMask wallet first.");
+      }
+
+      if (account.toLowerCase() !== AUTHORIZED_TEST_WALLET) {
+        throw new Error(
+          "Connect the authorized test wallet to mint collateral."
+        );
+      }
+
+      setMintingCollateral(true);
+      setError("");
+      setMintCollateralMessage("");
+
+      const txHash = await mintCollateral(account, "10");
+
+      setMintCollateralMessage(
+        `Successfully minted 10 mCOL. Transaction: ${txHash}`
+      );
+
+      await loadDashboard(account);
+    } catch (err: any) {
+      console.error("Collateral minting failed:", err);
+
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Collateral minting failed."
+      );
+    } finally {
+      setMintingCollateral(false);
+    }
+  }
+
+  // =========================================
+  // REPAYMENT HANDLERS
+  // =========================================
+
+  async function handleApproveRepayment() {
+    try {
+      setApprovingRepayment(true);
+      setError("");
+      setRepaymentMessage("");
+
+      const transactionHash = await approveRepayment();
+
+      setRepaymentMessage(
+        `USDC repayment approval successful. Transaction: ${transactionHash}`
+      );
+
+      await loadDashboard(account);
+    } catch (err: any) {
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Repayment approval failed."
+      );
+    } finally {
+      setApprovingRepayment(false);
+    }
+  }
+
+  async function handlePayInstallment() {
+    try {
+      setPayingInstallment(true);
+      setError("");
+      setRepaymentMessage("");
+
+      const transactionHash = await payMurabahaInstallment();
+
+      setRepaymentMessage(
+        `Installment paid successfully. Transaction: ${transactionHash}`
+      );
+
+      await loadDashboard(account);
+    } catch (err: any) {
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Installment payment failed."
+      );
+    } finally {
+      setPayingInstallment(false);
+    }
+  }
+
+  // =========================================
   // UNDERWRITING SUBMISSION
   // =========================================
 
@@ -213,9 +455,7 @@ const [underwriterMessage, setUnderwriterMessage] = useState("");
         );
       }
 
-      const result = await submitUnderwritingRecord(
-        encryptedEnvelope
-      );
+      const result = await submitUnderwritingRecord(encryptedEnvelope);
 
       setUnderwritingMessage(
         `Application submitted successfully. Transaction: ${result.transactionHash}`
@@ -275,142 +515,186 @@ const [underwriterMessage, setUnderwriterMessage] = useState("");
   }
 
   // =========================================
-// CHECK UNDERWRITER PERMISSIONS
-// =========================================
+  // PENDING UNDERWRITING APPLICATIONS
+  // =========================================
 
-async function checkUnderwriterPermissions(address: string) {
-  try {
-    const permissions = await getUnderwriterAccess(address);
+  async function loadPendingApplications() {
+    setLoadingApplications(true);
 
-    setIsUnderwriter(permissions.authorized);
-    setIsAdmin(permissions.isAdmin);
+    try {
+      const applications = await getPendingUnderwritingApplications();
 
-    console.log("Underwriter permissions:", permissions);
-  } catch (err) {
-    console.error("Permission check failed:", err);
+      setPendingApplications(applications);
 
-    setIsUnderwriter(false);
-    setIsAdmin(false);
+      console.log(
+        "Pending underwriting applications:",
+        applications
+      );
+    } catch (err: any) {
+      console.error("Unable to load pending applications:", err);
+
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Unable to load pending applications."
+      );
+    } finally {
+      setLoadingApplications(false);
+    }
   }
-}
 
-// =========================================
-// LOAD BORROWER RECORD
-// =========================================
+  // =========================================
+  // CHECK UNDERWRITER PERMISSIONS
+  // =========================================
 
-async function loadUnderwriterRecord() {
-  try {
-    setLoadingUnderwriterRecord(true);
-    setError("");
-    setUnderwriterMessage("");
+  async function checkUnderwriterPermissions(address: string) {
+    try {
+      const permissions = await getUnderwriterAccess(address);
 
-    if (!underwriterBorrower.trim()) {
-      throw new Error("Enter a borrower wallet address.");
+      setIsUnderwriter(permissions.authorized);
+      setIsAdmin(permissions.isAdmin);
+
+      console.log("Underwriter permissions:", permissions);
+
+      if (permissions.authorized) {
+        await loadPendingApplications();
+      } else {
+        setPendingApplications([]);
+      }
+    } catch (err) {
+      console.error("Permission check failed:", err);
+
+      setIsUnderwriter(false);
+      setIsAdmin(false);
+      setPendingApplications([]);
     }
-
-    if (!isUnderwriter) {
-      throw new Error("Your wallet is not authorized as an underwriter.");
-    }
-
-    const record = await getUnderwriterRecord(
-      underwriterBorrower.trim()
-    );
-
-    setUnderwriterRecord(record);
-  } catch (err: any) {
-    console.error("Record loading error:", err);
-
-    setUnderwriterRecord(null);
-
-    setError(
-      err.shortMessage ||
-        err.reason ||
-        err.message ||
-        "Unable to load underwriting record."
-    );
-  } finally {
-    setLoadingUnderwriterRecord(false);
   }
-}
 
-// =========================================
-// APPROVE OR REJECT APPLICATION
-// =========================================
+  // =========================================
+  // LOAD BORROWER RECORD
+  // =========================================
 
-async function handleUnderwritingReview(approved: boolean) {
-  try {
-    setReviewingApplication(true);
-    setError("");
-    setUnderwriterMessage("");
+  async function loadUnderwriterRecord() {
+    try {
+      setLoadingUnderwriterRecord(true);
+      setError("");
+      setUnderwriterMessage("");
 
-    if (!isUnderwriter) {
-      throw new Error("Your wallet is not authorized to review applications.");
+      if (!underwriterBorrower.trim()) {
+        throw new Error("Enter a borrower wallet address.");
+      }
+
+      if (!isUnderwriter) {
+        throw new Error(
+          "Your wallet is not authorized as an underwriter."
+        );
+      }
+
+      const record = await getUnderwriterRecord(
+        underwriterBorrower.trim()
+      );
+
+      setUnderwriterRecord(record);
+    } catch (err: any) {
+      console.error("Record loading error:", err);
+
+      setUnderwriterRecord(null);
+
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Unable to load underwriting record."
+      );
+    } finally {
+      setLoadingUnderwriterRecord(false);
     }
-
-    if (!underwriterRecord) {
-      throw new Error("Load an application first.");
-    }
-
-    if (underwriterRecord.status !== "PENDING") {
-      throw new Error("Only pending applications can be reviewed.");
-    }
-
-    const result = await reviewUnderwritingRecord(
-      underwriterRecord.borrower,
-      approved
-    );
-
-    setUnderwriterMessage(
-      `Application ${result.status}. Transaction: ${result.transactionHash}`
-    );
-
-    const updatedRecord = await getUnderwriterRecord(
-      underwriterRecord.borrower
-    );
-
-    setUnderwriterRecord(updatedRecord);
-
-    if (
-      account.toLowerCase() ===
-      underwriterRecord.borrower.toLowerCase()
-    ) {
-      await loadDashboard(account);
-    }
-  } catch (err: any) {
-    console.error("Review transaction error:", err);
-
-    setError(
-      err.shortMessage ||
-        err.reason ||
-        err.message ||
-        "Unable to review application."
-    );
-  } finally {
-    setReviewingApplication(false);
   }
-}
+
+  // =========================================
+  // APPROVE OR REJECT APPLICATION
+  // =========================================
+
+  async function handleUnderwritingReview(approved: boolean) {
+    try {
+      setReviewingApplication(true);
+      setError("");
+      setUnderwriterMessage("");
+
+      if (!isUnderwriter) {
+        throw new Error(
+          "Your wallet is not authorized to review applications."
+        );
+      }
+
+      if (!underwriterRecord) {
+        throw new Error("Load an application first.");
+      }
+
+      if (underwriterRecord.status !== "PENDING") {
+        throw new Error(
+          "Only pending applications can be reviewed."
+        );
+      }
+
+      const result = await reviewUnderwritingRecord(
+        underwriterRecord.borrower,
+        approved
+      );
+
+      setUnderwriterMessage(
+        `Application ${result.status}. Transaction: ${result.transactionHash}`
+      );
+
+      const updatedRecord = await getUnderwriterRecord(
+        underwriterRecord.borrower
+      );
+
+      setUnderwriterRecord(updatedRecord);
+      await loadPendingApplications();
+
+      if (
+        account.toLowerCase() ===
+        underwriterRecord.borrower.toLowerCase()
+      ) {
+        await loadDashboard(account);
+      }
+    } catch (err: any) {
+      console.error("Review transaction error:", err);
+
+      setError(
+        err.shortMessage ||
+          err.reason ||
+          err.message ||
+          "Unable to review application."
+      );
+    } finally {
+      setReviewingApplication(false);
+    }
+  }
 
   // =========================================
   // LOAD DASHBOARD WHEN ACCOUNT CHANGES
   // =========================================
 
   useEffect(() => {
-  if (account) {
-    loadDashboard(account);
+    if (account) {
+      loadDashboard(account);
+      setUnderwriterBorrower(account);
+      checkUnderwriterPermissions(account);
+    } else {
+      setDashboard(null);
 
-    setUnderwriterBorrower(account);
+      setIsUnderwriter(false);
+      setIsAdmin(false);
 
-    checkUnderwriterPermissions(account);
-  } else {
-    setDashboard(null);
+      setUnderwriterRecord(null);
+      setUnderwriterBorrower("");
+      setPendingApplications([]);
+    }
+  }, [account]);
 
-    setIsUnderwriter(false);
-    setIsAdmin(false);
-
-    setUnderwriterRecord(null);
-    setUnderwriterBorrower("");
-  }
-}, [account]);
   // =========================================
   // WALLET EVENTS
   // =========================================
@@ -462,13 +746,14 @@ async function handleUnderwritingReview(approved: boolean) {
       return "Not scheduled";
     }
 
-    return new Date(
-      Number(timestamp) * 1000
-    ).toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+    return new Date(Number(timestamp) * 1000).toLocaleDateString(
+      undefined,
+      {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }
+    );
   }
 
   function shortenAddress(address: string) {
@@ -506,7 +791,10 @@ async function handleUnderwritingReview(approved: boolean) {
     installmentTotal > 0
       ? Math.min(
           100,
-          Math.max(0, (installmentsPaid / installmentTotal) * 100)
+          Math.max(
+            0,
+            (installmentsPaid / installmentTotal) * 100
+          )
         )
       : 0;
 
@@ -522,7 +810,6 @@ async function handleUnderwritingReview(approved: boolean) {
 
   return (
     <div className="app">
-
       {/* NAVIGATION */}
 
       <nav className="navbar">
@@ -550,7 +837,6 @@ async function handleUnderwritingReview(approved: boolean) {
       </nav>
 
       <main className="container">
-
         {/* HERO */}
 
         <section className="hero">
@@ -602,6 +888,7 @@ async function handleUnderwritingReview(approved: boolean) {
         {error && (
           <div className="error">
             <span>⚠ {error}</span>
+
             <button
               className="dismiss-btn"
               onClick={() => setError("")}
@@ -615,11 +902,11 @@ async function handleUnderwritingReview(approved: boolean) {
 
         {account && (
           <section className="dashboard">
-
             <div className="section-heading">
               <div>
                 <p className="eyebrow">ON-CHAIN ACCOUNT</p>
                 <h2>Welcome Back</h2>
+
                 <p className="section-description">
                   Manage your financing and underwriting applications.
                 </p>
@@ -648,10 +935,12 @@ async function handleUnderwritingReview(approved: boolean) {
               <div className="empty-state">
                 <div className="empty-icon">◈</div>
                 <h3>Account data unavailable</h3>
+
                 <p>
                   Your wallet is connected, but we could not
                   retrieve your dashboard information.
                 </p>
+
                 <button
                   className="primary-btn"
                   onClick={() => loadDashboard(account)}
@@ -663,11 +952,9 @@ async function handleUnderwritingReview(approved: boolean) {
 
             {dashboard && (
               <>
-
                 {/* ACCOUNT OVERVIEW */}
 
                 <div className="overview-grid">
-
                   <div className="overview-card wallet-card">
                     <div className="overview-top">
                       <span className="overview-icon">◈</span>
@@ -693,9 +980,7 @@ async function handleUnderwritingReview(approved: boolean) {
                       </span>
                     </div>
 
-                    <h3>
-                      {dashboard.token.balance}
-                    </h3>
+                    <h3>{dashboard.token.balance}</h3>
 
                     <span className="overview-caption">
                       USDC
@@ -722,7 +1007,6 @@ async function handleUnderwritingReview(approved: boolean) {
                       {dashboard.underwriting.status}
                     </span>
                   </div>
-
                 </div>
 
                 {/* UNDERWRITING */}
@@ -731,6 +1015,7 @@ async function handleUnderwritingReview(approved: boolean) {
                   <div>
                     <p className="eyebrow">APPLICATION CENTER</p>
                     <h2>Underwriting</h2>
+
                     <p className="section-description">
                       Submit encrypted evidence for financing eligibility.
                     </p>
@@ -746,11 +1031,124 @@ async function handleUnderwritingReview(approved: boolean) {
                 </div>
 
                 <div className="underwriting-panel">
+                  {/* PENDING APPLICATION QUEUE */}
+
+                  <div className="pending-applications-section">
+                    <div className="section-heading">
+                      <div>
+                        <p className="eyebrow">
+                          UNDERWRITING QUEUE
+                        </p>
+
+                        <h3>
+                          Pending Applications ({pendingApplications.length})
+                        </h3>
+
+                        <p className="section-description">
+                          Applications submitted by borrowers awaiting review.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={loadPendingApplications}
+                        disabled={loadingApplications}
+                      >
+                        {loadingApplications
+                          ? "Refreshing..."
+                          : "↻ Refresh"}
+                      </button>
+                    </div>
+
+                    {loadingApplications ? (
+                      <div className="notice">
+                        Loading pending applications...
+                      </div>
+                    ) : pendingApplications.length === 0 ? (
+                      <div className="notice">
+                        No pending applications found.
+                      </div>
+                    ) : (
+                      <div className="pending-applications-list">
+                        {pendingApplications.map((application) => (
+                          <div
+                            className="pending-application-card"
+                            key={application.borrower.toLowerCase()}
+                          >
+                            <div className="detail-item">
+                              <span className="data-label">
+                                BORROWER
+                              </span>
+
+                              <strong>
+                                {shortenAddress(application.borrower)}
+                              </strong>
+                            </div>
+
+                            <div className="detail-item">
+                              <span className="data-label">
+                                SUBMITTED
+                              </span>
+
+                              <strong>
+                                {application.submittedAt
+                                  ? new Date(
+                                      Number(application.submittedAt) * 1000
+                                    ).toLocaleString()
+                                  : "Unavailable"}
+                              </strong>
+                            </div>
+
+                            <div className="detail-item">
+                              <span className="data-label">
+                                STATUS
+                              </span>
+
+                              <span className="badge badge-warning">
+                                PENDING
+                              </span>
+                            </div>
+
+                            <div className="detail-item">
+                              <span className="data-label">
+                                ENCRYPTED EVIDENCE HASH
+                              </span>
+
+                              <code className="hash-value">
+                                {application.ciphertextHash}
+                              </code>
+                            </div>
+
+                            <button
+                              type="button"
+                              className="primary-button"
+                              onClick={() => {
+                                setUnderwriterBorrower(
+                                  application.borrower
+                                );
+
+                                setUnderwriterRecord(application);
+                                setUnderwriterMessage("");
+                                setError("");
+                              }}
+                            >
+                              Review Application
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* UNDERWRITING APPLICATION */}
 
                   <div className="module-intro">
                     <div className="module-icon">🛡️</div>
+
                     <div>
                       <h3>Underwriting Application</h3>
+
                       <p>
                         Securely submit your encrypted QoreSeal
                         evidence envelope for review.
@@ -759,11 +1157,11 @@ async function handleUnderwritingReview(approved: boolean) {
                   </div>
 
                   <div className="underwriting-details">
-
                     <div className="detail-item">
                       <span className="data-label">
                         Application Status
                       </span>
+
                       <strong>
                         {dashboard.underwriting.status}
                       </strong>
@@ -773,6 +1171,7 @@ async function handleUnderwritingReview(approved: boolean) {
                       <span className="data-label">
                         Submission Date
                       </span>
+
                       <strong>
                         {formatDate(
                           dashboard.underwriting.submittedAt
@@ -786,6 +1185,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           Assigned Reviewer
                         </span>
+
                         <strong>
                           {shortenAddress(
                             dashboard.underwriting.reviewer
@@ -793,12 +1193,10 @@ async function handleUnderwritingReview(approved: boolean) {
                         </strong>
                       </div>
                     )}
-
                   </div>
 
                   {canSubmitUnderwriting ? (
                     <div className="submission-form">
-
                       <label htmlFor="encryptedEnvelope">
                         Encrypted QoreSeal Evidence Envelope
                       </label>
@@ -861,15 +1259,21 @@ async function handleUnderwritingReview(approved: boolean) {
                       <p>{underwritingMessage}</p>
                     </div>
                   )}
-
                 </div>
 
                 {/* MURABAHA FINANCING */}
 
-                <div className="module-heading financing-heading">
+                <div
+                  className="module-heading financing-heading"
+                  id="murabaha-financing"
+                >
                   <div>
-                    <p className="eyebrow">ASSET-BACKED FINANCING</p>
+                    <p className="eyebrow">
+                      ASSET-BACKED FINANCING
+                    </p>
+
                     <h2>Murabaha Financing</h2>
+
                     <p className="section-description">
                       Track your purchase cost, sale price and repayment.
                     </p>
@@ -889,22 +1293,416 @@ async function handleUnderwritingReview(approved: boolean) {
                 </div>
 
                 {!dashboard.financing.active ? (
-                  <div className="empty-state financing-empty">
-                    <div className="empty-icon">⌂</div>
-                    <h3>No active Murabaha financing</h3>
-                    <p>
-                      Your financing details will appear here once
-                      a Murabaha agreement has been created.
-                    </p>
+                  <div className="financing-empty">
+                    {!dashboard.underwriting.approved ? (
+                      <div className="notice notice-neutral">
+                        <strong>
+                          Underwriting approval required
+                        </strong>
+
+                        <p>
+                          Your application must be approved before
+                          you can request Murabaha financing.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="financing-module">
+                        {/* FINANCING INTRODUCTION */}
+
+                        <div className="financing-module-header">
+                          <div className="module-intro">
+                            <div className="module-icon">⌂</div>
+
+                            <div>
+                              <span className="eyebrow">
+                                ASSET-BACKED FINANCING
+                              </span>
+
+                              <h3>
+                                Request Murabaha Financing
+                              </h3>
+
+                              <p>
+                                Sharia-compliant asset financing with
+                                transparent pricing and scheduled repayments.
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className="financing-status-badge">
+                            No Active Financing
+                          </span>
+                        </div>
+
+                        {/* COLLATERAL SUMMARY */}
+
+                        <div className="collateral-grid">
+                          <div className="collateral-card">
+                            <span className="data-label">
+                              AVAILABLE COLLATERAL
+                            </span>
+
+                            <strong>
+                              {dashboard.token.collateralBalance}
+                            </strong>
+
+                            <small>
+                              Collateral token balance
+                            </small>
+                          </div>
+
+                          <div className="collateral-card">
+                            <span className="data-label">
+                              APPROVED ALLOWANCE
+                            </span>
+
+                            <strong>
+                              {dashboard.token.collateralAllowance}
+                            </strong>
+
+                            <small>
+                              Amount authorized for the financing contract
+                            </small>
+                          </div>
+                        </div>
+
+                        {/* FINANCING FORM */}
+
+                        <div className="financing-form-card">
+                          <div className="form-heading">
+                            <h4>Financing Details</h4>
+
+                            <p>
+                              Enter the amount you want to finance and
+                              select your repayment period.
+                            </p>
+                          </div>
+
+                          <div className="financing-form-grid">
+                            <div className="form-field">
+                              <label htmlFor="financingAmount">
+                                Financing Amount
+                              </label>
+
+                              <div className="input-with-suffix">
+                                <input
+                                  id="financingAmount"
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="e.g. 1000"
+                                  value={financingAmount}
+                                  onChange={(event) => {
+                                    setFinancingAmount(
+                                      event.target.value
+                                    );
+
+                                    setFinancingQuote(null);
+                                    setFinancingMessage("");
+                                  }}
+                                  disabled={
+                                    loadingQuote ||
+                                    submittingFinancing
+                                  }
+                                />
+
+                                <span>USDC</span>
+                              </div>
+
+                              <small>
+                                Enter the purchase financing amount.
+                              </small>
+                            </div>
+
+                            <div className="form-field">
+                              <label htmlFor="financingInstallments">
+                                Repayment Period
+                              </label>
+
+                              <select
+                                id="financingInstallments"
+                                value={financingInstallments}
+                                onChange={(event) => {
+                                  setFinancingInstallments(
+                                    Number(event.target.value)
+                                  );
+
+                                  setFinancingQuote(null);
+                                  setFinancingMessage("");
+                                }}
+                                disabled={
+                                  loadingQuote ||
+                                  submittingFinancing
+                                }
+                              >
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(
+                                  (number) => (
+                                    <option
+                                      key={number}
+                                      value={number}
+                                    >
+                                      {number}{" "}
+                                      {number === 1
+                                        ? "Installment"
+                                        : "Installments"}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+
+                              <small>
+                                Payments are scheduled at 30-day intervals.
+                              </small>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="primary-btn quote-button"
+                            onClick={handleGetFinancingQuote}
+                            disabled={
+                              loadingQuote ||
+                              submittingFinancing ||
+                              !financingAmount.trim()
+                            }
+                          >
+                            {loadingQuote
+                              ? "Calculating Quote..."
+                              : "Calculate Financing Quote →"}
+                          </button>
+                        </div>
+
+                        {/* COLLATERAL WARNING */}
+
+                        {BigInt(
+                          dashboard.token.collateralBalanceRaw
+                        ) === 0n && (
+                          <div className="notice notice-warning">
+                            <strong>Collateral required</strong>
+
+                            <p>
+                              Your wallet currently has no collateral tokens.
+                              You will need sufficient collateral before
+                              submitting a financing request.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* DEVELOPER TESTNET MINT TOOL */}
+
+                        {account.toLowerCase() ===
+                          AUTHORIZED_TEST_WALLET && (
+                          <div className="underwriting-panel">
+                            <div className="module-intro">
+                              <div className="module-icon">🪙</div>
+
+                              <div>
+                                <h3>Developer Testnet Tools</h3>
+
+                                <p>
+                                  Mint mock collateral tokens for testing
+                                  Murabaha financing on QORE Diana Testnet.
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              className="primary-btn"
+                              onClick={handleMintCollateral}
+                              disabled={mintingCollateral}
+                            >
+                              {mintingCollateral
+                                ? "Minting mCOL..."
+                                : "Mint 10 mCOL"}
+                            </button>
+
+                            {mintCollateralMessage && (
+                              <div className="success">
+                                <strong>✓ Collateral Minted</strong>
+                                <p>{mintCollateralMessage}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* FINANCING QUOTE */}
+
+                        {financingQuote && (
+                          <div className="quote-section">
+                            <div className="form-heading">
+                              <h4>Your Financing Quote</h4>
+
+                              <p>
+                                Review the purchase cost, markup and
+                                collateral requirements before proceeding.
+                              </p>
+                            </div>
+
+                            <div className="data-grid">
+                              <div className="data-card">
+                                <span className="data-label">
+                                  PURCHASE COST
+                                </span>
+
+                                <strong>
+                                  {financingQuote.amount} USDC
+                                </strong>
+                              </div>
+
+                              <div className="data-card">
+                                <span className="data-label">
+                                  MURABAHA MARKUP
+                                </span>
+
+                                <strong>
+                                  {financingQuote.markup} USDC
+                                </strong>
+                              </div>
+
+                              <div className="data-card highlight-card">
+                                <span className="data-label">
+                                  AGREED SALE PRICE
+                                </span>
+
+                                <strong>
+                                  {financingQuote.salePrice} USDC
+                                </strong>
+                              </div>
+
+                              <div className="data-card">
+                                <span className="data-label">
+                                  REQUIRED COLLATERAL
+                                </span>
+
+                                <strong>
+                                  {financingQuote.requiredCollateral}
+                                </strong>
+                              </div>
+
+                              <div className="data-card">
+                                <span className="data-label">
+                                  ORACLE PRICE
+                                </span>
+
+                                <strong>
+                                  {financingQuote.oraclePrice}
+                                </strong>
+                              </div>
+
+                              <div className="data-card">
+                                <span className="data-label">
+                                  INSTALLMENTS
+                                </span>
+
+                                <strong>
+                                  {financingQuote.installments}
+                                </strong>
+                              </div>
+                            </div>
+
+                            {/* COLLATERAL VALIDATION */}
+
+                            {BigInt(
+                              dashboard.token.collateralBalanceRaw
+                            ) <
+                            BigInt(
+                              financingQuote.requiredCollateralRaw
+                            ) ? (
+                              <div className="notice notice-warning">
+                                <strong>
+                                  Insufficient collateral balance
+                                </strong>
+
+                                <p>
+                                  Your collateral balance is insufficient
+                                  for this financing request.
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="financing-actions">
+                                {BigInt(
+                                  dashboard.token.collateralAllowanceRaw
+                                ) <
+                                BigInt(
+                                  financingQuote.requiredCollateralRaw
+                                ) ? (
+                                  <>
+                                    <div className="notice notice-neutral">
+                                      <strong>
+                                        Step 1: Authorize collateral
+                                      </strong>
+
+                                      <p>
+                                        Approve the required collateral
+                                        amount before submitting your
+                                        financing request.
+                                      </p>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      className="primary-btn"
+                                      onClick={handleApproveCollateral}
+                                      disabled={approvingCollateral}
+                                    >
+                                      {approvingCollateral
+                                        ? "Approving Collateral..."
+                                        : "1. Approve Required Collateral"}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="notice notice-success">
+                                      <strong>
+                                        Collateral authorization complete
+                                      </strong>
+
+                                      <p>
+                                        Your collateral allowance is
+                                        sufficient. You can now submit
+                                        your financing request.
+                                      </p>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      className="primary-btn"
+                                      onClick={handleRequestFinancing}
+                                      disabled={submittingFinancing}
+                                    >
+                                      {submittingFinancing
+                                        ? "Creating Financing..."
+                                        : "2. Submit Murabaha Financing →"}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* TRANSACTION FEEDBACK */}
+
+                        {financingMessage && (
+                          <div className="success">
+                            <strong>✓ Financing Update</strong>
+                            <p>{financingMessage}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <>
-                    <div className="data-grid">
+                    {/* ACTIVE FINANCING SUMMARY */}
 
+                    <div className="data-grid">
                       <div className="data-card">
                         <span className="data-label">
                           FINANCING COST
                         </span>
+
                         <strong>
                           {dashboard.financing.costPrice}
                         </strong>
@@ -914,6 +1712,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           AGREED SALE PRICE
                         </span>
+
                         <strong>
                           {dashboard.financing.salePrice}
                         </strong>
@@ -923,6 +1722,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           AMOUNT PAID
                         </span>
+
                         <strong>
                           {dashboard.financing.paidAmount}
                         </strong>
@@ -932,6 +1732,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           OUTSTANDING BALANCE
                         </span>
+
                         <strong>
                           {dashboard.financing.outstanding}
                         </strong>
@@ -941,6 +1742,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           INSTALLMENT AMOUNT
                         </span>
+
                         <strong>
                           {dashboard.financing.installmentAmount}
                         </strong>
@@ -950,6 +1752,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           COLLATERAL
                         </span>
+
                         <strong>
                           {dashboard.financing.collateralAmount}
                         </strong>
@@ -959,6 +1762,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           INSTALLMENTS PAID
                         </span>
+
                         <strong>
                           {installmentsPaid} / {installmentTotal}
                         </strong>
@@ -968,13 +1772,13 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span className="data-label">
                           NEXT DUE DATE
                         </span>
+
                         <strong>
                           {formatDate(
                             dashboard.financing.nextDueDate
                           )}
                         </strong>
                       </div>
-
                     </div>
 
                     {/* REPAYMENT PROGRESS */}
@@ -983,9 +1787,7 @@ async function handleUnderwritingReview(approved: boolean) {
                       <div className="progress-heading">
                         <div>
                           <h3>Repayment Progress</h3>
-                          <p>
-                            Installments completed
-                          </p>
+                          <p>Installments completed</p>
                         </div>
 
                         <strong>
@@ -1006,6 +1808,7 @@ async function handleUnderwritingReview(approved: boolean) {
                         <span>
                           {installmentsPaid} completed
                         </span>
+
                         <span>
                           {Math.max(
                             0,
@@ -1013,6 +1816,58 @@ async function handleUnderwritingReview(approved: boolean) {
                           )} remaining
                         </span>
                       </div>
+                    </div>
+
+                    {/* INSTALLMENT REPAYMENT */}
+
+                    <div className="repayment-actions">
+                      <h3>Make an Installment Payment</h3>
+
+                      <p>
+                        Outstanding balance:{" "}
+                        {dashboard.financing.outstanding} USDC
+                      </p>
+
+                      <p>
+                        Next installment:{" "}
+                        {dashboard.financing.installmentAmount} USDC
+                      </p>
+
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={handleApproveRepayment}
+                        disabled={
+                          approvingRepayment ||
+                          payingInstallment
+                        }
+                      >
+                        {approvingRepayment
+                          ? "Approving USDC..."
+                          : "1. Approve USDC Repayment"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        onClick={handlePayInstallment}
+                        disabled={
+                          payingInstallment ||
+                          approvingRepayment ||
+                          BigInt(dashboard.token.allowanceRaw) === 0n
+                        }
+                      >
+                        {payingInstallment
+                          ? "Processing Payment..."
+                          : "2. Pay Installment"}
+                      </button>
+
+                      {repaymentMessage && (
+                        <div className="success">
+                          <strong>✓ Repayment Update</strong>
+                          <p>{repaymentMessage}</p>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -1024,11 +1879,11 @@ async function handleUnderwritingReview(approved: boolean) {
                 </h3>
 
                 <div className="account-summary status-summary">
-
                   <div>
                     <span className="data-label">
                       FINANCING STATUS
                     </span>
+
                     <strong>
                       {dashboard.financing.active
                         ? "Active"
@@ -1040,6 +1895,7 @@ async function handleUnderwritingReview(approved: boolean) {
                     <span className="data-label">
                       PAYMENT STATUS
                     </span>
+
                     <span
                       className={
                         dashboard.repayment.late
@@ -1057,6 +1913,7 @@ async function handleUnderwritingReview(approved: boolean) {
                     <span className="data-label">
                       LIQUIDATION STATUS
                     </span>
+
                     <span
                       className={
                         dashboard.repayment.liquidatable
@@ -1069,232 +1926,274 @@ async function handleUnderwritingReview(approved: boolean) {
                         : "Not Liquidatable"}
                     </span>
                   </div>
-
                 </div>
-
               </>
             )}
-
           </section>
         )}
-{/* ========================================= */}
-{/* UNDERWRITER REVIEW DASHBOARD */}
-{/* ========================================= */}
 
-{account && (
-  <section className="dashboard">
+        {/* UNDERWRITER REVIEW DASHBOARD */}
 
-    <div className="section-heading">
-      <div>
-        <p className="eyebrow">APPLICATION MANAGEMENT</p>
-        <h2>Underwriter Review</h2>
-        <p className="section-description">
-          Review borrower applications and record decisions on QORE Chain.
-        </p>
-      </div>
+        {account && (
+          <section className="dashboard">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">
+                  APPLICATION MANAGEMENT
+                </p>
 
-      <span
-        className={
-          isUnderwriter
-            ? "badge badge-success"
-            : "badge badge-danger"
-        }
-      >
-        {isUnderwriter ? "AUTHORIZED UNDERWRITER" : "NOT AUTHORIZED"}
-      </span>
-    </div>
+                <h2>Underwriter Review</h2>
 
-    {!isUnderwriter ? (
-      <div className="notice notice-warning">
-        <strong>Underwriter access required</strong>
-        <p>
-          Your connected wallet does not have permission to review applications.
-        </p>
-      </div>
-    ) : (
-      <div className="underwriting-panel">
+                <p className="section-description">
+                  Review borrower applications and record decisions
+                  on QORE Chain.
+                </p>
+              </div>
 
-        <div className="module-intro">
-          <div className="module-icon">⚖️</div>
-
-          <div>
-            <h3>Application Review</h3>
-            <p>
-              Enter a borrower wallet address to retrieve its underwriting record.
-            </p>
-          </div>
-        </div>
-
-        <div className="detail-item">
-          <span className="data-label">CONNECTED UNDERWRITER</span>
-          <strong>{shortenAddress(account)}</strong>
-        </div>
-
-        {isAdmin && (
-          <span className="badge badge-success">
-            ADMINISTRATOR
-          </span>
-        )}
-
-        <div className="submission-form">
-
-          <label htmlFor="underwriterBorrower">
-            Borrower Wallet Address
-          </label>
-
-          <input
-            id="underwriterBorrower"
-            type="text"
-            value={underwriterBorrower}
-            onChange={(event) => {
-              setUnderwriterBorrower(event.target.value);
-              setUnderwriterRecord(null);
-              setUnderwriterMessage("");
-            }}
-            placeholder="0x..."
-            disabled={
-              loadingUnderwriterRecord ||
-              reviewingApplication
-            }
-            style={{
-              width: "100%",
-              padding: "14px",
-              borderRadius: "8px",
-              border: "1px solid #dce5df",
-              marginTop: "10px",
-              marginBottom: "15px",
-            }}
-          />
-
-          <button
-            className="primary-btn"
-            onClick={loadUnderwriterRecord}
-            disabled={
-              loadingUnderwriterRecord ||
-              reviewingApplication ||
-              !underwriterBorrower.trim()
-            }
-          >
-            {loadingUnderwriterRecord
-              ? "Loading Application..."
-              : "Load Application →"}
-          </button>
-
-        </div>
-
-        {underwriterRecord && (
-          <div className="underwriting-details">
-
-            <div className="detail-item">
-              <span className="data-label">BORROWER</span>
-              <strong title={underwriterRecord.borrower}>
-                {shortenAddress(underwriterRecord.borrower)}
-              </strong>
-            </div>
-
-            <div className="detail-item">
-              <span className="data-label">APPLICATION STATUS</span>
-              <span className={statusClass(underwriterRecord.status)}>
-                {underwriterRecord.status}
-              </span>
-            </div>
-
-            <div className="detail-item">
-              <span className="data-label">SUBMISSION DATE</span>
-              <strong>
-                {formatDate(underwriterRecord.submittedAt)}
-              </strong>
-            </div>
-
-            <div className="detail-item">
-              <span className="data-label">REVIEWER</span>
-              <strong>
-                {underwriterRecord.reviewer ===
-                "0x0000000000000000000000000000000000000000"
-                  ? "Not reviewed"
-                  : shortenAddress(underwriterRecord.reviewer)}
-              </strong>
-            </div>
-
-            <div className="detail-item">
-              <span className="data-label">REVIEW DATE</span>
-              <strong>
-                {formatDate(underwriterRecord.reviewedAt)}
-              </strong>
-            </div>
-
-            <div
-              className="detail-item"
-              style={{ gridColumn: "1 / -1" }}
-            >
-              <span className="data-label">
-                ENCRYPTED EVIDENCE HASH
-              </span>
-
-              <code
-                style={{
-                  overflowWrap: "anywhere",
-                  fontSize: "12px",
-                  marginTop: "8px",
-                }}
+              <span
+                className={
+                  isUnderwriter
+                    ? "badge badge-success"
+                    : "badge badge-danger"
+                }
               >
-                {underwriterRecord.ciphertextHash}
-              </code>
+                {isUnderwriter
+                  ? "AUTHORIZED UNDERWRITER"
+                  : "NOT AUTHORIZED"}
+              </span>
             </div>
 
-          </div>
+            {!isUnderwriter ? (
+              <div className="notice notice-warning">
+                <strong>Underwriter access required</strong>
+
+                <p>
+                  Your connected wallet does not have permission
+                  to review applications.
+                </p>
+              </div>
+            ) : (
+              <div className="underwriting-panel">
+                <div className="module-intro">
+                  <div className="module-icon">⚖️</div>
+
+                  <div>
+                    <h3>Application Review</h3>
+
+                    <p>
+                      Enter a borrower wallet address to retrieve
+                      its underwriting record.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="detail-item">
+                  <span className="data-label">
+                    CONNECTED UNDERWRITER
+                  </span>
+
+                  <strong>
+                    {shortenAddress(account)}
+                  </strong>
+                </div>
+
+                {isAdmin && (
+                  <span className="badge badge-success">
+                    ADMINISTRATOR
+                  </span>
+                )}
+
+                <div className="submission-form">
+                  <label htmlFor="underwriterBorrower">
+                    Borrower Wallet Address
+                  </label>
+
+                  <input
+                    id="underwriterBorrower"
+                    type="text"
+                    value={underwriterBorrower}
+                    onChange={(event) => {
+                      setUnderwriterBorrower(event.target.value);
+                      setUnderwriterRecord(null);
+                      setUnderwriterMessage("");
+                    }}
+                    placeholder="0x..."
+                    disabled={
+                      loadingUnderwriterRecord ||
+                      reviewingApplication
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "14px",
+                      borderRadius: "8px",
+                      border: "1px solid #dce5df",
+                      marginTop: "10px",
+                      marginBottom: "15px",
+                    }}
+                  />
+
+                  <button
+                    className="primary-btn"
+                    onClick={loadUnderwriterRecord}
+                    disabled={
+                      loadingUnderwriterRecord ||
+                      reviewingApplication ||
+                      !underwriterBorrower.trim()
+                    }
+                  >
+                    {loadingUnderwriterRecord
+                      ? "Loading Application..."
+                      : "Load Application →"}
+                  </button>
+                </div>
+
+                {underwriterRecord && (
+                  <div className="underwriting-details">
+                    <div className="detail-item">
+                      <span className="data-label">
+                        BORROWER
+                      </span>
+
+                      <strong title={underwriterRecord.borrower}>
+                        {shortenAddress(
+                          underwriterRecord.borrower
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="detail-item">
+                      <span className="data-label">
+                        APPLICATION STATUS
+                      </span>
+
+                      <span
+                        className={statusClass(
+                          underwriterRecord.status
+                        )}
+                      >
+                        {underwriterRecord.status}
+                      </span>
+                    </div>
+
+                    <div className="detail-item">
+                      <span className="data-label">
+                        SUBMISSION DATE
+                      </span>
+
+                      <strong>
+                        {formatDate(
+                          underwriterRecord.submittedAt
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="detail-item">
+                      <span className="data-label">
+                        REVIEWER
+                      </span>
+
+                      <strong>
+                        {underwriterRecord.reviewer ===
+                        "0x0000000000000000000000000000000000000000"
+                          ? "Not reviewed"
+                          : shortenAddress(
+                              underwriterRecord.reviewer
+                            )}
+                      </strong>
+                    </div>
+
+                    <div className="detail-item">
+                      <span className="data-label">
+                        REVIEW DATE
+                      </span>
+
+                      <strong>
+                        {formatDate(
+                          underwriterRecord.reviewedAt
+                        )}
+                      </strong>
+                    </div>
+
+                    <div
+                      className="detail-item"
+                      style={{ gridColumn: "1 / -1" }}
+                    >
+                      <span className="data-label">
+                        ENCRYPTED EVIDENCE HASH
+                      </span>
+
+                      <code
+                        style={{
+                          overflowWrap: "anywhere",
+                          fontSize: "12px",
+                          marginTop: "8px",
+                        }}
+                      >
+                        {underwriterRecord.ciphertextHash}
+                      </code>
+                    </div>
+                  </div>
+                )}
+
+                {underwriterRecord?.status === "PENDING" && (
+                  <div className="form-footer">
+                    <button
+                      className="primary-btn"
+                      onClick={() =>
+                        handleUnderwritingReview(true)
+                      }
+                      disabled={reviewingApplication}
+                    >
+                      {reviewingApplication
+                        ? "Processing..."
+                        : "✓ Approve Application"}
+                    </button>
+
+                    <button
+                      className="card-btn"
+                      onClick={() =>
+                        handleUnderwritingReview(false)
+                      }
+                      disabled={reviewingApplication}
+                    >
+                      ✕ Reject Application
+                    </button>
+                  </div>
+                )}
+
+                {underwriterRecord &&
+                  underwriterRecord.status !== "PENDING" && (
+                    <div className="notice notice-neutral">
+                      This application has already been reviewed
+                      or is not currently eligible for review.
+                    </div>
+                  )}
+
+                {underwriterMessage && (
+                  <div className="success">
+                    <strong>
+                      ✓ Review Transaction Confirmed
+                    </strong>
+
+                    <p>{underwriterMessage}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         )}
 
-        {underwriterRecord?.status === "PENDING" && (
-          <div className="form-footer">
-
-            <button
-              className="primary-btn"
-              onClick={() => handleUnderwritingReview(true)}
-              disabled={reviewingApplication}
-            >
-              {reviewingApplication
-                ? "Processing..."
-                : "✓ Approve Application"}
-            </button>
-
-            <button
-              className="card-btn"
-              onClick={() => handleUnderwritingReview(false)}
-              disabled={reviewingApplication}
-            >
-              ✕ Reject Application
-            </button>
-
-          </div>
-        )}
-
-        {underwriterRecord &&
-          underwriterRecord.status !== "PENDING" && (
-            <div className="notice notice-neutral">
-              This application has already been reviewed or is not
-              currently eligible for review.
-            </div>
-          )}
-
-        {underwriterMessage && (
-          <div className="success">
-            <strong>✓ Review Transaction Confirmed</strong>
-            <p>{underwriterMessage}</p>
-          </div>
-        )}
-
-      </div>
-    )}
-  </section>
-)}
         {/* QORESEAL BROWSER TEST */}
 
         <section className="dashboard">
           <div className="module-heading">
             <div>
-              <p className="eyebrow">PRIVACY & ENCRYPTION</p>
+              <p className="eyebrow">
+                PRIVACY & ENCRYPTION
+              </p>
+
               <h2>QoreSeal Browser Test</h2>
+
               <p className="section-description">
                 Test encrypted financial data directly in your browser.
               </p>
@@ -1304,8 +2203,10 @@ async function handleUnderwritingReview(approved: boolean) {
           <div className="underwriting-panel">
             <div className="module-intro">
               <div className="module-icon">🔐</div>
+
               <div>
                 <h3>Encryption Verification</h3>
+
                 <p>
                   Generate temporary keys, encrypt sample financial
                   information and verify decryption.
@@ -1345,11 +2246,12 @@ async function handleUnderwritingReview(approved: boolean) {
         {/* FINANCIAL SERVICES */}
 
         <section className="dashboard services-section">
-
           <div className="section-heading">
             <div>
               <p className="eyebrow">YOUR PLATFORM</p>
+
               <h2>Financial Services</h2>
+
               <p className="section-description">
                 Ethical financial products built on blockchain technology.
               </p>
@@ -1361,26 +2263,40 @@ async function handleUnderwritingReview(approved: boolean) {
           </div>
 
           <div className="cards">
-
             <div className="card">
               <div className="card-icon">⌂</div>
+
               <h3>Murabaha Financing</h3>
+
               <p>
                 Request asset-backed financing with transparent
                 purchase cost and an agreed sale price.
               </p>
-              <button className="card-btn" disabled>
-                Coming Next →
+
+              <button
+                className="card-btn"
+                onClick={() => {
+                  document
+                    .querySelector("#murabaha-financing")
+                    ?.scrollIntoView({
+                      behavior: "smooth",
+                    });
+                }}
+              >
+                Open Financing →
               </button>
             </div>
 
             <div className="card">
               <div className="card-icon">↗</div>
+
               <h3>Mudarabah Investment</h3>
+
               <p>
                 Participate in Sharia-compliant investment
                 opportunities and agreed profit-sharing arrangements.
               </p>
+
               <button className="card-btn" disabled>
                 Coming Next →
               </button>
@@ -1388,11 +2304,14 @@ async function handleUnderwritingReview(approved: boolean) {
 
             <div className="card">
               <div className="card-icon">♢</div>
+
               <h3>Underwriting</h3>
+
               <p>
                 Review financing eligibility and collateral
                 through on-chain underwriting.
               </p>
+
               <button className="card-btn" disabled>
                 Available in Dashboard
               </button>
@@ -1400,16 +2319,18 @@ async function handleUnderwritingReview(approved: boolean) {
 
             <div className="card">
               <div className="card-icon">⌑</div>
+
               <h3>QoreSeal Verification</h3>
+
               <p>
                 Verify financing evidence and on-chain
                 attestation records.
               </p>
+
               <button className="card-btn" disabled>
                 Coming Next →
               </button>
             </div>
-
           </div>
         </section>
 
@@ -1428,11 +2349,9 @@ async function handleUnderwritingReview(approved: boolean) {
             © 2026 WEIDAI | Built on QORE Chain
           </p>
         </footer>
-
       </main>
     </div>
   );
 }
 
 export default App;
- 

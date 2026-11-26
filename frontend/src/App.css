@@ -1127,3 +1127,273 @@ button:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+.pending-applications-section {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.pending-applications-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.pending-application-card {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hash-value {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* =========================================
+   MURABAHA FINANCING UX
+========================================= */
+
+.financing-module {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+}
+
+.financing-module-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.financing-module .module-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.financing-module .module-intro h3 {
+  margin: 4px 0 8px;
+  font-size: 1.35rem;
+}
+
+.financing-module .module-intro p {
+  margin: 0;
+  opacity: 0.7;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  opacity: 0.65;
+}
+
+.financing-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 13px;
+  border-radius: 30px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.collateral-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.collateral-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  background: rgba(148, 163, 184, 0.045);
+}
+
+.collateral-card strong {
+  font-size: 1.65rem;
+  font-weight: 700;
+}
+
+.collateral-card small {
+  opacity: 0.6;
+  font-size: 0.78rem;
+}
+
+.financing-form-card {
+  padding: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  background: rgba(148, 163, 184, 0.035);
+}
+
+.form-heading {
+  margin-bottom: 22px;
+}
+
+.form-heading h4 {
+  margin: 0 0 7px;
+  font-size: 1.05rem;
+}
+
+.form-heading p {
+  margin: 0;
+  font-size: 0.86rem;
+  opacity: 0.65;
+  line-height: 1.5;
+}
+
+.financing-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+
+.form-field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.form-field small {
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+.input-with-suffix {
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.input-with-suffix input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+}
+
+.input-with-suffix span {
+  padding: 0 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.65;
+}
+
+.financing-form-card select,
+.financing-form-card input {
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.financing-form-card .input-with-suffix input {
+  border: none;
+  border-radius: 0;
+}
+
+.financing-form-card select:focus,
+.financing-form-card input:focus,
+.input-with-suffix:focus-within {
+  outline: none;
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.1);
+}
+
+.financing-form-card select option {
+  color: #111827;
+}
+
+.quote-button {
+  width: 100%;
+  min-height: 48px;
+  font-weight: 700;
+}
+
+.financing-module .data-grid {
+  margin-top: 4px;
+}
+
+.financing-module .data-card {
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.financing-module .highlight-card {
+  border: 1px solid rgba(22, 163, 74, 0.45);
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.financing-module .notice {
+  border-radius: 12px;
+  padding: 16px 18px;
+  line-height: 1.6;
+}
+
+.financing-module .notice p {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+}
+
+.financing-module button {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.financing-module button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.financing-module button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Responsive layout */
+
+@media (max-width: 650px) {
+  .collateral-grid,
+  .financing-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .financing-module-header {
+    flex-direction: column;
+  }
+
+  .financing-form-card {
+    padding: 17px;
+  }
+
+  .collateral-card {
+    padding: 17px;
+  }
+}
