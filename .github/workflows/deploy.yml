@@ -1,8 +1,9 @@
-name: Deploy WEIDAI to GitHub Pages
+name: Deploy WEIDAI Frontend
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -11,7 +12,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: github-pages
   cancel-in-progress: true
 
 jobs:
@@ -34,17 +35,17 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        working-directory: frontend
         run: npm ci
-        working-directory: frontend
 
-      - name: Build WEIDAI
+      - name: Build frontend
+        working-directory: frontend
         run: npm run build
-        working-directory: frontend
 
-      - name: Setup Pages
+      - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload build
+      - name: Upload frontend
         uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
