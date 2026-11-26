@@ -809,3 +809,215 @@ export async function mintCollateral(
 
   return tx.hash;
 }
+
+// =========================================
+// MUDARABAH POOL LIQUIDITY
+// =========================================
+
+const MUDARABAH_POOL_ADDRESS =
+  "0x946671a66c86Cec634038C924BD5a2697D66942C";
+
+const USDC_MINT_ABI = [
+  "function mint(address to, uint256 amount) external",
+  "function decimals() view returns (uint8)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) external",
+];
+
+const MUDARABAH_POOL_ABI = [
+  "function deposit(uint256 amount) external returns (uint256 sharesMinted)",
+  "function shares(address account) view returns (uint256)",
+  "function totalShares() view returns (uint256)",
+  "function shareValue() view returns (uint256)",
+];
+
+// =========================================
+// MINT TEST USDC
+// =========================================
+
+export async function mintTestUSDC(
+  recipient: string,
+  amount: string
+) {
+  if (!isAddress(recipient)) {
+    throw new Error("Invalid recipient address.");
+  }
+
+  if (!amount.trim() || Number(amount) <= 0) {
+    throw new Error("Enter a valid USDC amount.");
+  }
+
+  const signer = await getQoreSigner();
+
+  const token = new Contract(
+    CONTRACT_ADDRESSES.USDC,
+    USDC_MINT_ABI,
+    signer
+  );
+
+  const decimals = Number(await token.decimals());
+
+  const amountRaw = parseUnits(
+    amount.trim(),
+    decimals
+  );
+
+  const transaction = await token.mint(
+    recipient,
+    amountRaw
+  );
+
+  const receipt = await transaction.wait(1);
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error("USDC minting failed.");
+  }
+
+  return {
+    transactionHash: receipt.hash,
+    recipient,
+    amount,
+  };
+}
+
+// =========================================
+// APPROVE MUDARABAH POOL
+// =========================================
+
+export async function approveMudarabahDeposit(
+  amount: string
+) {
+  if (!amount.trim() || Number(amount) <= 0) {
+    throw new Error("Enter a valid USDC amount.");
+  }
+
+  const signer = await getQoreSigner();
+
+  const token = new Contract(
+    CONTRACT_ADDRESSES.USDC,
+    USDC_MINT_ABI,
+    signer
+  );
+
+  const decimals = Number(await token.decimals());
+
+  const amountRaw = parseUnits(
+    amount.trim(),
+    decimals
+  );
+
+  const transaction = await token.approve(
+    MUDARABAH_POOL_ADDRESS,
+    amountRaw
+  );
+
+  const receipt = await transaction.wait(1);
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(
+      "Mudarabah pool approval failed."
+    );
+  }
+
+  return receipt.hash;
+}
+
+// =========================================
+// DEPOSIT USDC INTO MUDARABAH POOL
+// =========================================
+
+export async function depositMudarabahLiquidity(
+  amount: string
+) {
+  if (!amount.trim() || Number(amount) <= 0) {
+    throw new Error("Enter a valid USDC amount.");
+  }
+
+  const signer = await getQoreSigner();
+
+  const providerAddress = await signer.getAddress();
+
+  const token = new Contract(
+    CONTRACT_ADDRESSES.USDC,
+    USDC_MINT_ABI,
+    signer
+  );
+
+  const decimals = Number(await token.decimals());
+
+  const amountRaw = parseUnits(
+    amount.trim(),
+    decimals
+  );
+
+  const balance = BigInt(
+    (await token.balanceOf(providerAddress)).toString()
+  );
+
+  if (balance < amountRaw) {
+    throw new Error(
+      "Insufficient USDC balance. Mint or obtain test USDC first."
+    );
+  }
+
+  const allowance = BigInt(
+    (
+      await token.allowance(
+        providerAddress,
+        MUDARABAH_POOL_ADDRESS
+      )
+    ).toString()
+  );
+
+  if (allowance < amountRaw) {
+    throw new Error(
+      "Insufficient pool allowance. Approve USDC first."
+    );
+  }
+
+  const pool = new Contract(
+    MUDARABAH_POOL_ADDRESS,
+    MUDARABAH_POOL_ABI,
+    signer
+  );
+
+  const transaction = await pool.deposit(amountRaw);
+
+  const receipt = await transaction.wait(1);
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(
+      "Mudarabah liquidity deposit failed."
+    );
+  }
+
+  return {
+    transactionHash: receipt.hash,
+    provider: providerAddress,
+    depositedAmount: amount,
+  };
+}
+
+// =========================================
+// GET MUDARABAH POOL INFORMATION
+// =========================================
+
+export async function getMudarabahPoolInfo() {
+  const [poolBalance, totalShares] = await Promise.all([
+    usdc.balanceOf(MUDARABAH_POOL_ADDRESS),
+    new Contract(
+      MUDARABAH_POOL_ADDRESS,
+      MUDARABAH_POOL_ABI,
+      provider
+    ).totalShares(),
+  ]);
+
+  const decimals = Number(await usdc.decimals());
+
+  return {
+    poolAddress: MUDARABAH_POOL_ADDRESS,
+    liquidity: formatUnits(poolBalance, decimals),
+    totalShares: totalShares.toString(),
+  };
+}

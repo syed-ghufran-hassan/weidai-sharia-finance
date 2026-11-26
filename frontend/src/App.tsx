@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserProvider } from "ethers";
+import { BrowserProvider, Contract, parseUnits } from "ethers";
 import { runQoreSealBrowserTest } from "./lib/qoresealBrowserTest";
 
 import {
@@ -34,6 +34,25 @@ const QORE_NETWORK = {
 
 const AUTHORIZED_TEST_WALLET =
   "0x7b5de1962d5f338cf00e25f1d5803c922bb76224";
+
+const MOCK_USDC_ADDRESS =
+  "0xf7781F60e42dbbBfac98feF2A7612Cf61beAbd53";
+
+const MUDARABAH_POOL_ADDRESS =
+  "0x946671a66c86Cec634038C924BD5a2697D66942C";
+
+const TEST_LIQUIDITY_AMOUNT = parseUnits("1000", 18);
+
+const MOCK_USDC_ABI = [
+  "function mint(address to, uint256 amount)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+];
+
+const MUDARABAH_POOL_ABI = [
+  "function deposit(uint256 amount) returns (uint256 sharesMinted)",
+]; 
 
 type DashboardData = Awaited<
   ReturnType<typeof getBorrowerDashboard>
@@ -102,6 +121,11 @@ function App() {
   const [repaymentMessage, setRepaymentMessage] = useState("");
 
   // TEST COLLATERAL MINTING STATE
+
+  const [mintingUSDC, setMintingUSDC] = useState(false);
+const [approvingUSDC, setApprovingUSDC] = useState(false);
+const [depositingLiquidity, setDepositingLiquidity] = useState(false);
+const [liquidityMessage, setLiquidityMessage] = useState("");
 
   const [mintingCollateral, setMintingCollateral] = useState(false);
   const [mintCollateralMessage, setMintCollateralMessage] = useState("");
@@ -380,6 +404,197 @@ function App() {
       setMintingCollateral(false);
     }
   }
+
+  // =========================================
+// TESTNET mUSDC LIQUIDITY HANDLERS
+// =========================================
+
+async function getTestnetSigner() {
+  if (!window.ethereum) {
+    throw new Error("Please install MetaMask.");
+  }
+
+  if (!account) {
+    throw new Error("Connect your MetaMask wallet first.");
+  }
+
+  if (account.toLowerCase() !== AUTHORIZED_TEST_WALLET) {
+    throw new Error("Connect the authorized test wallet.");
+  }
+
+  const provider = new BrowserProvider(window.ethereum);
+  const network = await provider.getNetwork();
+
+  if (Number(network.chainId) !== QORE_CHAIN_ID) {
+    throw new Error("Please switch MetaMask to QORE Diana Testnet.");
+  }
+
+  return provider.getSigner();
+}
+
+async function handleMintUSDC() {
+  try {
+    setMintingUSDC(true);
+    setError("");
+    setLiquidityMessage("");
+
+    const signer = await getTestnetSigner();
+
+    const token = new Contract(
+      MOCK_USDC_ADDRESS,
+      MOCK_USDC_ABI,
+      signer
+    );
+
+    const tx = await token.mint(
+      account,
+      TEST_LIQUIDITY_AMOUNT
+    );
+
+    setLiquidityMessage(
+      `mUSDC mint transaction submitted: ${tx.hash}`
+    );
+
+    await tx.wait();
+
+    const balance = await token.balanceOf(account);
+
+    setLiquidityMessage(
+      `Successfully minted 1,000 mUSDC. Wallet balance: ${
+        Number(balance) / 1e18
+      } mUSDC. Transaction: ${tx.hash}`
+    );
+  } catch (err: any) {
+    console.error("mUSDC mint failed:", err);
+
+    setError(
+      err.shortMessage ||
+        err.reason ||
+        err.message ||
+        "mUSDC minting failed."
+    );
+  } finally {
+    setMintingUSDC(false);
+  }
+}
+
+async function handleApproveUSDC() {
+  try {
+    setApprovingUSDC(true);
+    setError("");
+    setLiquidityMessage("");
+
+    const signer = await getTestnetSigner();
+
+    const token = new Contract(
+      MOCK_USDC_ADDRESS,
+      MOCK_USDC_ABI,
+      signer
+    );
+
+    const balance = await token.balanceOf(account);
+
+    if (balance < TEST_LIQUIDITY_AMOUNT) {
+      throw new Error(
+        "Your mUSDC balance is insufficient. Mint 1,000 mUSDC first."
+      );
+    }
+
+    const tx = await token.approve(
+      MUDARABAH_POOL_ADDRESS,
+      TEST_LIQUIDITY_AMOUNT
+    );
+
+    setLiquidityMessage(
+      `mUSDC approval submitted: ${tx.hash}`
+    );
+
+    await tx.wait();
+
+    setLiquidityMessage(
+      `Successfully approved 1,000 mUSDC for the Mudarabah pool. Transaction: ${tx.hash}`
+    );
+  } catch (err: any) {
+    console.error("mUSDC approval failed:", err);
+
+    setError(
+      err.shortMessage ||
+        err.reason ||
+        err.message ||
+        "mUSDC approval failed."
+    );
+  } finally {
+    setApprovingUSDC(false);
+  }
+}
+
+async function handleDepositLiquidity() {
+  try {
+    setDepositingLiquidity(true);
+    setError("");
+    setLiquidityMessage("");
+
+    const signer = await getTestnetSigner();
+
+    const token = new Contract(
+      MOCK_USDC_ADDRESS,
+      MOCK_USDC_ABI,
+      signer
+    );
+
+    const pool = new Contract(
+      MUDARABAH_POOL_ADDRESS,
+      MUDARABAH_POOL_ABI,
+      signer
+    );
+
+    const balance = await token.balanceOf(account);
+
+    if (balance < TEST_LIQUIDITY_AMOUNT) {
+      throw new Error("Insufficient mUSDC wallet balance.");
+    }
+
+    const allowance = await token.allowance(
+      account,
+      MUDARABAH_POOL_ADDRESS
+    );
+
+    if (allowance < TEST_LIQUIDITY_AMOUNT) {
+      throw new Error(
+        "Approve 1,000 mUSDC for the pool before depositing."
+      );
+    }
+
+    const tx = await pool.deposit(TEST_LIQUIDITY_AMOUNT);
+
+    setLiquidityMessage(
+      `Liquidity deposit submitted: ${tx.hash}`
+    );
+
+    await tx.wait();
+
+    const poolBalance = await token.balanceOf(
+      MUDARABAH_POOL_ADDRESS
+    );
+
+    setLiquidityMessage(
+      `Successfully deposited 1,000 mUSDC into the Mudarabah pool. Pool balance: ${
+        Number(poolBalance) / 1e18
+      } mUSDC. Transaction: ${tx.hash}`
+    );
+  } catch (err: any) {
+    console.error("Liquidity deposit failed:", err);
+
+    setError(
+      err.shortMessage ||
+        err.reason ||
+        err.message ||
+        "Liquidity deposit failed."
+    );
+  } finally {
+    setDepositingLiquidity(false);
+  }
+}
 
   // =========================================
   // REPAYMENT HANDLERS
@@ -1488,43 +1703,125 @@ function App() {
                           </div>
                         )}
 
-                        {/* DEVELOPER TESTNET MINT TOOL */}
+                       {/* DEVELOPER TESTNET TOOLS */}
 
-                        {account.toLowerCase() ===
-                          AUTHORIZED_TEST_WALLET && (
-                          <div className="underwriting-panel">
-                            <div className="module-intro">
-                              <div className="module-icon">🪙</div>
+{account.toLowerCase() === AUTHORIZED_TEST_WALLET && (
+  <div className="underwriting-panel">
+    <div className="module-intro">
+      <div className="module-icon">🪙</div>
 
-                              <div>
-                                <h3>Developer Testnet Tools</h3>
+      <div>
+        <h3>Developer Testnet Tools</h3>
 
-                                <p>
-                                  Mint mock collateral tokens for testing
-                                  Murabaha financing on QORE Diana Testnet.
-                                </p>
-                              </div>
-                            </div>
+        <p>
+          Mint test tokens and fund the Mudarabah pool
+          to test Murabaha financing on QORE Diana Testnet.
+        </p>
+      </div>
+    </div>
 
-                            <button
-                              type="button"
-                              className="primary-btn"
-                              onClick={handleMintCollateral}
-                              disabled={mintingCollateral}
-                            >
-                              {mintingCollateral
-                                ? "Minting mCOL..."
-                                : "Mint 10 mCOL"}
-                            </button>
+    {/* COLLATERAL MINT */}
 
-                            {mintCollateralMessage && (
-                              <div className="success">
-                                <strong>✓ Collateral Minted</strong>
-                                <p>{mintCollateralMessage}</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
+    <div className="detail-item">
+      <span className="data-label">COLLATERAL TOKEN</span>
+
+      <button
+        type="button"
+        className="primary-btn"
+        onClick={handleMintCollateral}
+        disabled={mintingCollateral}
+      >
+        {mintingCollateral ? "Minting mCOL..." : "Mint 10 mCOL"}
+      </button>
+
+      {mintCollateralMessage && (
+        <div className="success">
+          <p>{mintCollateralMessage}</p>
+        </div>
+      )}
+    </div>
+
+    <hr />
+
+    {/* USDC LIQUIDITY */}
+
+    <div className="detail-item">
+      <span className="data-label">MOCK USDC LIQUIDITY</span>
+
+      <p>
+        Step 1: Mint 1,000 mock USDC to your connected wallet.
+      </p>
+
+      <button
+        type="button"
+        className="primary-btn"
+        onClick={handleMintUSDC}
+        disabled={
+          mintingUSDC ||
+          approvingUSDC ||
+          depositingLiquidity
+        }
+      >
+        {mintingUSDC ? "Minting mUSDC..." : "1. Mint 1,000 mUSDC"}
+      </button>
+    </div>
+
+    <div className="detail-item">
+      <p>
+        Step 2: Approve the Mudarabah pool to use your 1,000 mUSDC.
+      </p>
+
+      <button
+        type="button"
+        className="primary-btn"
+        onClick={handleApproveUSDC}
+        disabled={
+          mintingUSDC ||
+          approvingUSDC ||
+          depositingLiquidity
+        }
+      >
+        {approvingUSDC
+          ? "Approving mUSDC..."
+          : "2. Approve 1,000 mUSDC"}
+      </button>
+    </div>
+
+    <div className="detail-item">
+      <p>
+        Step 3: Deposit the approved mUSDC into the
+        Mudarabah pool.
+      </p>
+
+      <button
+        type="button"
+        className="primary-btn"
+        onClick={handleDepositLiquidity}
+        disabled={
+          mintingUSDC ||
+          approvingUSDC ||
+          depositingLiquidity
+        }
+      >
+        {depositingLiquidity
+          ? "Depositing Liquidity..."
+          : "3. Deposit 1,000 mUSDC into Pool"}
+      </button>
+    </div>
+
+    {liquidityMessage && (
+      <div className="success">
+        <strong>✓ Liquidity Update</strong>
+        <p>{liquidityMessage}</p>
+      </div>
+    )}
+
+    <p className="section-description">
+      Testnet only: mUSDC is a mock token with no real-world
+      monetary value.
+    </p>
+  </div>
+)}
 
                         {/* FINANCING QUOTE */}
 
