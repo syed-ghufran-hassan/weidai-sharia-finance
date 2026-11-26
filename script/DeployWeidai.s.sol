@@ -11,10 +11,7 @@ import "../test/mocks/ERC20Mock.sol";
 
 contract DeployWeidai is Script {
     function run() external {
-        uint256 deployerPrivateKey = vm.deriveKey(
-    vm.envString("MNEMONIC"),
-    0
-);
+        uint256 deployerPrivateKey = vm.deriveKey(vm.envString("MNEMONIC"), 0);
         address deployer = vm.addr(deployerPrivateKey);
 
         address underwriter = vm.envOr("UNDERWRITER_ADDRESS", deployer);
