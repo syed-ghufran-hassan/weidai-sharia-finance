@@ -16,7 +16,7 @@ export async function runQoreSealBrowserTest() {
 
   // Dummy financing information.
   const financialData = {
-    borrower: "BrowserTest001",
+    borrower: "BrowserTest001", 
     requestedAmount: "5000",
     currency: "USDC",
     monthlyIncome: "1200",
